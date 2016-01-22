@@ -1,7 +1,14 @@
 /*
  * Driver for Linear Technology LTC2945 I2C Power Monitor
  *
- * Copyright (c) 2014 Guenter Roeck
+ * Copyright 2016 Tudor Design Systems, LLC.
+ *
+ * Author: Cody Tudor <cody.tudor@gmail.com>
+ *
+ * Derived from:
+ *
+ *      Driver for Linear Technology LTC2945 I2C Power Monitor
+ *      Copyright (c) 2014 Guenter Roeck
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -12,6 +19,7 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
+ *
  */
 
 #include <linux/kernel.h>
@@ -24,29 +32,31 @@
 #include <linux/jiffies.h>
 #include <linux/regmap.h>
 
+#define DRV_VERSION "1.1"
+
 /* chip registers */
-#define LTC2945_CONTROL         0x00
-#define LTC2945_ALERT           0x01
-#define LTC2945_STATUS          0x02
-#define LTC2945_FAULT           0x03
-#define LTC2945_POWER_H         0x05
-#define LTC2945_MAX_POWER_H     0x08
-#define LTC2945_MIN_POWER_H     0x0b
+#define LTC2945_CONTROL             0x00
+#define LTC2945_ALERT               0x01
+#define LTC2945_STATUS              0x02
+#define LTC2945_FAULT               0x03
+#define LTC2945_POWER_H             0x05
+#define LTC2945_MAX_POWER_H         0x08
+#define LTC2945_MIN_POWER_H         0x0b
 #define LTC2945_MAX_POWER_THRES_H   0x0e
 #define LTC2945_MIN_POWER_THRES_H   0x11
-#define LTC2945_SENSE_H         0x14
-#define LTC2945_MAX_SENSE_H     0x16
-#define LTC2945_MIN_SENSE_H     0x18
+#define LTC2945_SENSE_H             0x14
+#define LTC2945_MAX_SENSE_H         0x16
+#define LTC2945_MIN_SENSE_H         0x18
 #define LTC2945_MAX_SENSE_THRES_H   0x1a
 #define LTC2945_MIN_SENSE_THRES_H   0x1c
-#define LTC2945_VIN_H           0x1e
-#define LTC2945_MAX_VIN_H       0x20
-#define LTC2945_MIN_VIN_H       0x22
+#define LTC2945_VIN_H               0x1e
+#define LTC2945_MAX_VIN_H           0x20
+#define LTC2945_MIN_VIN_H           0x22
 #define LTC2945_MAX_VIN_THRES_H     0x24
 #define LTC2945_MIN_VIN_THRES_H     0x26
-#define LTC2945_ADIN_H          0x28
-#define LTC2945_MAX_ADIN_H      0x2a
-#define LTC2945_MIN_ADIN_H      0x2c
+#define LTC2945_ADIN_H              0x28
+#define LTC2945_MAX_ADIN_H          0x2a
+#define LTC2945_MIN_ADIN_H          0x2c
 #define LTC2945_MAX_ADIN_THRES_H    0x2e
 #define LTC2945_MIN_ADIN_THRES_H    0x30
 #define LTC2945_MIN_ADIN_THRES_L    0x31
@@ -347,123 +357,91 @@ static ssize_t ltc2945_show_bool(struct device *dev,
 
 /* Input voltages */
 
-static SENSOR_DEVICE_ATTR(in1_input, S_IRUGO, ltc2945_show_value, NULL,
-              LTC2945_VIN_H);
-static SENSOR_DEVICE_ATTR(in1_min, S_IRUGO | S_IWUSR, ltc2945_show_value,
-              ltc2945_set_value, LTC2945_MIN_VIN_THRES_H);
-static SENSOR_DEVICE_ATTR(in1_max, S_IRUGO | S_IWUSR, ltc2945_show_value,
-              ltc2945_set_value, LTC2945_MAX_VIN_THRES_H);
-static SENSOR_DEVICE_ATTR(in1_lowest, S_IRUGO, ltc2945_show_value, NULL,
-              LTC2945_MIN_VIN_H);
-static SENSOR_DEVICE_ATTR(in1_highest, S_IRUGO, ltc2945_show_value, NULL,
-              LTC2945_MAX_VIN_H);
-static SENSOR_DEVICE_ATTR(in1_reset_history, S_IWUSR, NULL,
-              ltc2945_reset_history, LTC2945_MIN_VIN_H);
+static SENSOR_DEVICE_ATTR(volt_input, S_IRUGO, ltc2945_show_value, NULL, LTC2945_VIN_H);
+static SENSOR_DEVICE_ATTR(volt_min, S_IRUGO | S_IWUSR, ltc2945_show_value, ltc2945_set_value, LTC2945_MIN_VIN_THRES_H);
+static SENSOR_DEVICE_ATTR(volt_max, S_IRUGO | S_IWUSR, ltc2945_show_value, ltc2945_set_value, LTC2945_MAX_VIN_THRES_H);
+static SENSOR_DEVICE_ATTR(volt_lowest, S_IRUGO, ltc2945_show_value, NULL, LTC2945_MIN_VIN_H);
+static SENSOR_DEVICE_ATTR(volt_highest, S_IRUGO, ltc2945_show_value, NULL, LTC2945_MAX_VIN_H);
+static SENSOR_DEVICE_ATTR(volt_reset_history, S_IWUSR, NULL, ltc2945_reset_history, LTC2945_MIN_VIN_H);
 
-static SENSOR_DEVICE_ATTR(in2_input, S_IRUGO, ltc2945_show_value, NULL,
-              LTC2945_ADIN_H);
-static SENSOR_DEVICE_ATTR(in2_min, S_IRUGO | S_IWUSR, ltc2945_show_value,
-              ltc2945_set_value, LTC2945_MIN_ADIN_THRES_H);
-static SENSOR_DEVICE_ATTR(in2_max, S_IRUGO | S_IWUSR, ltc2945_show_value,
-              ltc2945_set_value, LTC2945_MAX_ADIN_THRES_H);
-static SENSOR_DEVICE_ATTR(in2_lowest, S_IRUGO, ltc2945_show_value, NULL,
-              LTC2945_MIN_ADIN_H);
-static SENSOR_DEVICE_ATTR(in2_highest, S_IRUGO, ltc2945_show_value, NULL,
-              LTC2945_MAX_ADIN_H);
-static SENSOR_DEVICE_ATTR(in2_reset_history, S_IWUSR, NULL,
-              ltc2945_reset_history, LTC2945_MIN_ADIN_H);
+static SENSOR_DEVICE_ATTR(adc_input, S_IRUGO, ltc2945_show_value, NULL, LTC2945_ADIN_H);
+static SENSOR_DEVICE_ATTR(adc_min, S_IRUGO | S_IWUSR, ltc2945_show_value, ltc2945_set_value, LTC2945_MIN_ADIN_THRES_H);
+static SENSOR_DEVICE_ATTR(adc_max, S_IRUGO | S_IWUSR, ltc2945_show_value, ltc2945_set_value, LTC2945_MAX_ADIN_THRES_H);
+static SENSOR_DEVICE_ATTR(adc_lowest, S_IRUGO, ltc2945_show_value, NULL, LTC2945_MIN_ADIN_H);
+static SENSOR_DEVICE_ATTR(adc_highest, S_IRUGO, ltc2945_show_value, NULL, LTC2945_MAX_ADIN_H);
+static SENSOR_DEVICE_ATTR(adc_reset_history, S_IWUSR, NULL, ltc2945_reset_history, LTC2945_MIN_ADIN_H);
 
 /* Voltage alarms */
 
-static SENSOR_DEVICE_ATTR(in1_min_alarm, S_IRUGO, ltc2945_show_bool, NULL,
-              FAULT_VIN_UV);
-static SENSOR_DEVICE_ATTR(in1_max_alarm, S_IRUGO, ltc2945_show_bool, NULL,
-              FAULT_VIN_OV);
-static SENSOR_DEVICE_ATTR(in2_min_alarm, S_IRUGO, ltc2945_show_bool, NULL,
-              FAULT_ADIN_UV);
-static SENSOR_DEVICE_ATTR(in2_max_alarm, S_IRUGO, ltc2945_show_bool, NULL,
-              FAULT_ADIN_OV);
+static SENSOR_DEVICE_ATTR(volt_min_alarm, S_IRUGO, ltc2945_show_bool, NULL, FAULT_VIN_UV);
+static SENSOR_DEVICE_ATTR(volt_max_alarm, S_IRUGO, ltc2945_show_bool, NULL, FAULT_VIN_OV);
+static SENSOR_DEVICE_ATTR(adc_min_alarm, S_IRUGO, ltc2945_show_bool, NULL, FAULT_ADIN_UV);
+static SENSOR_DEVICE_ATTR(adc_max_alarm, S_IRUGO, ltc2945_show_bool, NULL, FAULT_ADIN_OV);
 
 /* Currents (via sense resistor) */
 
-static SENSOR_DEVICE_ATTR(curr1_input, S_IRUGO, ltc2945_show_value, NULL,
-              LTC2945_SENSE_H);
-static SENSOR_DEVICE_ATTR(curr1_min, S_IRUGO | S_IWUSR, ltc2945_show_value,
-              ltc2945_set_value, LTC2945_MIN_SENSE_THRES_H);
-static SENSOR_DEVICE_ATTR(curr1_max, S_IRUGO | S_IWUSR, ltc2945_show_value,
-              ltc2945_set_value, LTC2945_MAX_SENSE_THRES_H);
-static SENSOR_DEVICE_ATTR(curr1_lowest, S_IRUGO, ltc2945_show_value, NULL,
-              LTC2945_MIN_SENSE_H);
-static SENSOR_DEVICE_ATTR(curr1_highest, S_IRUGO, ltc2945_show_value, NULL,
-              LTC2945_MAX_SENSE_H);
-static SENSOR_DEVICE_ATTR(curr1_reset_history, S_IWUSR, NULL,
-              ltc2945_reset_history, LTC2945_MIN_SENSE_H);
+static SENSOR_DEVICE_ATTR(amp_input, S_IRUGO, ltc2945_show_value, NULL, LTC2945_SENSE_H);
+static SENSOR_DEVICE_ATTR(amp_min, S_IRUGO | S_IWUSR, ltc2945_show_value, ltc2945_set_value, LTC2945_MIN_SENSE_THRES_H);
+static SENSOR_DEVICE_ATTR(amp_max, S_IRUGO | S_IWUSR, ltc2945_show_value, ltc2945_set_value, LTC2945_MAX_SENSE_THRES_H);
+static SENSOR_DEVICE_ATTR(amp_lowest, S_IRUGO, ltc2945_show_value, NULL, LTC2945_MIN_SENSE_H);
+static SENSOR_DEVICE_ATTR(amp_highest, S_IRUGO, ltc2945_show_value, NULL, LTC2945_MAX_SENSE_H);
+static SENSOR_DEVICE_ATTR(amp_reset_history, S_IWUSR, NULL, ltc2945_reset_history, LTC2945_MIN_SENSE_H);
 
 /* Current alarms */
 
-static SENSOR_DEVICE_ATTR(curr1_min_alarm, S_IRUGO, ltc2945_show_bool, NULL,
-              FAULT_SENSE_UV);
-static SENSOR_DEVICE_ATTR(curr1_max_alarm, S_IRUGO, ltc2945_show_bool, NULL,
-              FAULT_SENSE_OV);
+static SENSOR_DEVICE_ATTR(amp_min_alarm, S_IRUGO, ltc2945_show_bool, NULL, FAULT_SENSE_UV);
+static SENSOR_DEVICE_ATTR(amp_max_alarm, S_IRUGO, ltc2945_show_bool, NULL, FAULT_SENSE_OV);
 
 /* Power */
 
-static SENSOR_DEVICE_ATTR(power1_input, S_IRUGO, ltc2945_show_value, NULL,
-              LTC2945_POWER_H);
-static SENSOR_DEVICE_ATTR(power1_min, S_IRUGO | S_IWUSR, ltc2945_show_value,
-              ltc2945_set_value, LTC2945_MIN_POWER_THRES_H);
-static SENSOR_DEVICE_ATTR(power1_max, S_IRUGO | S_IWUSR, ltc2945_show_value,
-              ltc2945_set_value, LTC2945_MAX_POWER_THRES_H);
-static SENSOR_DEVICE_ATTR(power1_input_lowest, S_IRUGO, ltc2945_show_value,
-              NULL, LTC2945_MIN_POWER_H);
-static SENSOR_DEVICE_ATTR(power1_input_highest, S_IRUGO, ltc2945_show_value,
-              NULL, LTC2945_MAX_POWER_H);
-static SENSOR_DEVICE_ATTR(power1_reset_history, S_IWUSR, NULL,
-              ltc2945_reset_history, LTC2945_MIN_POWER_H);
+static SENSOR_DEVICE_ATTR(power_input, S_IRUGO, ltc2945_show_value, NULL, LTC2945_POWER_H);
+static SENSOR_DEVICE_ATTR(power_min, S_IRUGO | S_IWUSR, ltc2945_show_value, ltc2945_set_value, LTC2945_MIN_POWER_THRES_H);
+static SENSOR_DEVICE_ATTR(power_max, S_IRUGO | S_IWUSR, ltc2945_show_value, ltc2945_set_value, LTC2945_MAX_POWER_THRES_H);
+static SENSOR_DEVICE_ATTR(power_input_lowest, S_IRUGO, ltc2945_show_value, NULL, LTC2945_MIN_POWER_H);
+static SENSOR_DEVICE_ATTR(power_input_highest, S_IRUGO, ltc2945_show_value, NULL, LTC2945_MAX_POWER_H);
+static SENSOR_DEVICE_ATTR(power_reset_history, S_IWUSR, NULL, ltc2945_reset_history, LTC2945_MIN_POWER_H);
 
 /* Power alarms */
 
-static SENSOR_DEVICE_ATTR(power1_min_alarm, S_IRUGO, ltc2945_show_bool, NULL,
-              FAULT_POWER_UV);
-static SENSOR_DEVICE_ATTR(power1_max_alarm, S_IRUGO, ltc2945_show_bool, NULL,
-              FAULT_POWER_OV);
+static SENSOR_DEVICE_ATTR(power_min_alarm, S_IRUGO, ltc2945_show_bool, NULL, FAULT_POWER_UV);
+static SENSOR_DEVICE_ATTR(power_max_alarm, S_IRUGO, ltc2945_show_bool, NULL, FAULT_POWER_OV);
 
 static struct attribute *ltc2945_attrs[] = {
-    &sensor_dev_attr_in1_input.dev_attr.attr,
-    &sensor_dev_attr_in1_min.dev_attr.attr,
-    &sensor_dev_attr_in1_max.dev_attr.attr,
-    &sensor_dev_attr_in1_lowest.dev_attr.attr,
-    &sensor_dev_attr_in1_highest.dev_attr.attr,
-    &sensor_dev_attr_in1_reset_history.dev_attr.attr,
-    &sensor_dev_attr_in1_min_alarm.dev_attr.attr,
-    &sensor_dev_attr_in1_max_alarm.dev_attr.attr,
+    &sensor_dev_attr_volt_input.dev_attr.attr,
+    &sensor_dev_attr_volt_min.dev_attr.attr,
+    &sensor_dev_attr_volt_max.dev_attr.attr,
+    &sensor_dev_attr_volt_lowest.dev_attr.attr,
+    &sensor_dev_attr_volt_highest.dev_attr.attr,
+    &sensor_dev_attr_volt_reset_history.dev_attr.attr,
+    &sensor_dev_attr_volt_min_alarm.dev_attr.attr,
+    &sensor_dev_attr_volt_max_alarm.dev_attr.attr,
 
-    &sensor_dev_attr_in2_input.dev_attr.attr,
-    &sensor_dev_attr_in2_min.dev_attr.attr,
-    &sensor_dev_attr_in2_max.dev_attr.attr,
-    &sensor_dev_attr_in2_lowest.dev_attr.attr,
-    &sensor_dev_attr_in2_highest.dev_attr.attr,
-    &sensor_dev_attr_in2_reset_history.dev_attr.attr,
-    &sensor_dev_attr_in2_min_alarm.dev_attr.attr,
-    &sensor_dev_attr_in2_max_alarm.dev_attr.attr,
+    &sensor_dev_attr_adc_input.dev_attr.attr,
+    &sensor_dev_attr_adc_min.dev_attr.attr,
+    &sensor_dev_attr_adc_max.dev_attr.attr,
+    &sensor_dev_attr_adc_lowest.dev_attr.attr,
+    &sensor_dev_attr_adc_highest.dev_attr.attr,
+    &sensor_dev_attr_adc_reset_history.dev_attr.attr,
+    &sensor_dev_attr_adc_min_alarm.dev_attr.attr,
+    &sensor_dev_attr_adc_max_alarm.dev_attr.attr,
 
-    &sensor_dev_attr_curr1_input.dev_attr.attr,
-    &sensor_dev_attr_curr1_min.dev_attr.attr,
-    &sensor_dev_attr_curr1_max.dev_attr.attr,
-    &sensor_dev_attr_curr1_lowest.dev_attr.attr,
-    &sensor_dev_attr_curr1_highest.dev_attr.attr,
-    &sensor_dev_attr_curr1_reset_history.dev_attr.attr,
-    &sensor_dev_attr_curr1_min_alarm.dev_attr.attr,
-    &sensor_dev_attr_curr1_max_alarm.dev_attr.attr,
+    &sensor_dev_attr_amp_input.dev_attr.attr,
+    &sensor_dev_attr_amp_min.dev_attr.attr,
+    &sensor_dev_attr_amp_max.dev_attr.attr,
+    &sensor_dev_attr_amp_lowest.dev_attr.attr,
+    &sensor_dev_attr_amp_highest.dev_attr.attr,
+    &sensor_dev_attr_amp_reset_history.dev_attr.attr,
+    &sensor_dev_attr_amp_min_alarm.dev_attr.attr,
+    &sensor_dev_attr_amp_max_alarm.dev_attr.attr,
 
-    &sensor_dev_attr_power1_input.dev_attr.attr,
-    &sensor_dev_attr_power1_min.dev_attr.attr,
-    &sensor_dev_attr_power1_max.dev_attr.attr,
-    &sensor_dev_attr_power1_input_lowest.dev_attr.attr,
-    &sensor_dev_attr_power1_input_highest.dev_attr.attr,
-    &sensor_dev_attr_power1_reset_history.dev_attr.attr,
-    &sensor_dev_attr_power1_min_alarm.dev_attr.attr,
-    &sensor_dev_attr_power1_max_alarm.dev_attr.attr,
+    &sensor_dev_attr_power_input.dev_attr.attr,
+    &sensor_dev_attr_power_min.dev_attr.attr,
+    &sensor_dev_attr_power_max.dev_attr.attr,
+    &sensor_dev_attr_power_input_lowest.dev_attr.attr,
+    &sensor_dev_attr_power_input_highest.dev_attr.attr,
+    &sensor_dev_attr_power_reset_history.dev_attr.attr,
+    &sensor_dev_attr_power_min_alarm.dev_attr.attr,
+    &sensor_dev_attr_power_max_alarm.dev_attr.attr,
 
     NULL,
 };
@@ -484,6 +462,9 @@ static int ltc2945_probe(struct i2c_client *client,
     
     if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C))
         return -ENODEV;
+        
+    dev_info(&client->dev,
+         "chip found, driver version " DRV_VERSION "\n");
 
     regmap = devm_regmap_init_i2c(client, &ltc2945_regmap_config);
     if (IS_ERR(regmap)) {
@@ -523,6 +504,7 @@ static struct i2c_driver ltc2945_driver = {
 
 module_i2c_driver(ltc2945_driver);
 
-MODULE_AUTHOR("Guenter Roeck <linux@roeck-us.net>");
-MODULE_DESCRIPTION("LTC2945 driver");
 MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Cody Tudor <cody.tudor@gmail.com>");
+MODULE_DESCRIPTION("LTC2945 driver");
+MODULE_VERSION(DRV_VERSION);
