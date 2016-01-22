@@ -18,13 +18,13 @@ Current Sense register. The reported value assumes that a 1 mOhm sense resistor
 is installed. If a different sense resistor is installed, calculate the real
 current by dividing the reported value by the sense resistor value in mOhm.
 
-You can explicitly instantiate a device by:
+You can explicitly instantiate a device like the following example:
 
-Example: the following will load the driver for an LTC2945 with I2C address 0x20
-on I2C bus #1:
-    * $ modprobe ltc2945
-    * $ echo ltc2945 0x10 > /sys/bus/i2c/devices/i2c-1/new_device
-    
+This will load the driver for an LTC2945 with I2C address 0x20 on I2C bus #1:
+```
+    $ modprobe ltc2945
+    $ echo ltc2945 0x10 > /sys/bus/i2c/devices/i2c-1/new_device
+``` 
     
 Or you can statically define a sensor with given address using the OF subsystem.
 
