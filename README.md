@@ -22,8 +22,8 @@ You can explicitly instantiate a device by:
 
 Example: the following will load the driver for an LTC2945 with I2C address 0x20
 on I2C bus #1:
-    $ modprobe ltc2945
-    $ echo ltc2945 0x10 > /sys/bus/i2c/devices/i2c-1/new_device
+    * $ modprobe ltc2945
+    * $ echo ltc2945 0x10 > /sys/bus/i2c/devices/i2c-1/new_device
     
     
 Or you can statically define a sensor with given address using the OF subsystem.
