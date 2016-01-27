@@ -1,7 +1,7 @@
 /*
  * Driver for Linear Technology LTC2945 I2C Power Monitor
  *
- * Copyright 2016 Tudor Design Systems, LLC.
+ * Copyleft 2016 Tudor Design Systems, LLC.
  *
  * Author: Cody Tudor <cody.tudor@gmail.com>
  *
