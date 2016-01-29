@@ -33,11 +33,13 @@ An example device tree entry would be:
     dev_name {
         compatible = "ltc2945";
         reg = <0x10>;
+        sense = <11>;
     }; 
 
 * @dev_name: this is the actual dev name that will be given to this sysfs entry in the hwmon class
 * @compatible: this is used to probe the sensor driver using OF properties
 * @reg: hexadecimal address of the sensor i.e. (address = 0xce) -> (reg = address >> 1)
+* @sense: (optional) value of the sense resistor in mOhms to scale measurements appropriately
 
 
 In the example above the device will appear as a client of the i2c bus node

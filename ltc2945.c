@@ -31,6 +31,7 @@
 #include <linux/hwmon-sysfs.h>
 #include <linux/jiffies.h>
 #include <linux/regmap.h>
+#include <linux/of.h>
 
 #define DRV_VERSION "1.1"
 
@@ -77,6 +78,23 @@
 #define CONTROL_MULT_SELECT (1 << 0)
 #define CONTROL_TEST_MODE   (1 << 4)
 
+/* Pulled this macro from linux/kernel.h in 4.* kernel branch */
+#define DIV_ROUND_CLOSEST_ULL(x, divisor)(     \
+{                                              \
+    typeof(divisor) __d = divisor;             \
+    unsigned long long _tmp = (x) + (__d) / 2; \
+    do_div(_tmp, __d);                         \
+    _tmp;                                      \
+}                                              \
+)
+
+/* Data structure for more than regmap... */
+struct ltc2945_data {
+    struct regmap *regmap;
+    unsigned long sense_res; /* sense resistor value in mOhms */
+};
+
+
 static inline bool is_power_reg(u8 reg)
 {
     return reg < LTC2945_SENSE_H;
@@ -85,13 +103,13 @@ static inline bool is_power_reg(u8 reg)
 /* Return the value from the given register in uW, mV, or mA */
 static long long ltc2945_reg_to_val(struct device *dev, u8 reg)
 {
-    struct regmap *regmap = dev_get_drvdata(dev);
+    struct ltc2945_data *drvdata = dev_get_drvdata(dev);
     unsigned int control;
     u8 buf[3];
     long long val;
     int ret;
 
-    ret = regmap_bulk_read(regmap, reg, buf,
+    ret = regmap_bulk_read(drvdata->regmap, reg, buf,
                    is_power_reg(reg) ? 3 : 2);
     if (ret < 0)
         return ret;
@@ -109,31 +127,36 @@ static long long ltc2945_reg_to_val(struct device *dev, u8 reg)
     case LTC2945_MAX_POWER_H:
     case LTC2945_MIN_POWER_H:
     case LTC2945_MAX_POWER_THRES_H:
-    case LTC2945_MIN_POWER_THRES_H:
+    case LTC2945_MIN_POWER_THRES_H:        
         /*
-         * Convert to uW by assuming current is measured with
-         * an 1mOhm sense resistor, similar to current
-         * measurements.
+         * Convert to power as measured with a 1 mOhm sense resistor, 
+         * divide by the sense resistor value (if defined in the dt), 
+         * and then return the result in uW. 
+         * 
          * Control register bit 0 selects if voltage at SENSE+/VDD
          * or voltage at ADIN is used to measure power.
          */
-        ret = regmap_read(regmap, LTC2945_CONTROL, &control);
+        ret = regmap_read(drvdata->regmap, LTC2945_CONTROL, &control);
         if (ret < 0)
             return ret;
         if (control & CONTROL_MULT_SELECT) {
-            /* 25 mV * 25 uV = 0.625 uV resolution. */
+            /* 25 mV * 25 uV = 0.625 uV resolution */
             val *= 625LL;
         } else {
-            /* 0.5 mV * 25 uV = 0.0125 uV resolution. */
+            /* 0.5 mV * 25 uV = 0.0125 uV resolution */
             val = (val * 25LL) >> 1;
         }
+        val = (drvdata->sense_res > 1) ? DIV_ROUND_CLOSEST_ULL(val, drvdata->sense_res) : val;
         break;
     case LTC2945_VIN_H:
     case LTC2945_MAX_VIN_H:
     case LTC2945_MIN_VIN_H:
     case LTC2945_MAX_VIN_THRES_H:
     case LTC2945_MIN_VIN_THRES_H:
-        /* 25 mV resolution. Convert to mV. */
+        /* 
+         * 102.4V / 12 bit = 25 mV resolution 
+         * Convert result to mV 
+         */
         val *= 25;
         break;
     case LTC2945_ADIN_H:
@@ -141,7 +164,10 @@ static long long ltc2945_reg_to_val(struct device *dev, u8 reg)
     case LTC2945_MIN_ADIN_THRES_H:
     case LTC2945_MAX_ADIN_THRES_H:
     case LTC2945_MIN_ADIN_H:
-        /* 0.5mV resolution. Convert to mV. */
+        /* 
+         * 2.048V / 12 bit = 0.5 mV resolution
+         * Convert result to mV 
+         */
         val = val >> 1;
         break;
     case LTC2945_SENSE_H:
@@ -150,13 +176,13 @@ static long long ltc2945_reg_to_val(struct device *dev, u8 reg)
     case LTC2945_MAX_SENSE_THRES_H:
     case LTC2945_MIN_SENSE_THRES_H:
         /*
-         * 25 uV resolution. Convert to current as measured with
-         * an 1 mOhm sense resistor, in mA. If a different sense
-         * resistor is installed, calculate the actual current by
-         * dividing the reported current by the sense resistor value
-         * in mOhm.
+         * 102.4mV / 12 bit = 25 uV resolution 
+         * Convert to current as measured with a 1 mOhm sense resistor, 
+         * divide by the sense resistor value (if defined in the dt), 
+         * and then return the result in mA. 
          */
         val *= 25;
+        val = (drvdata->sense_res > 1) ? DIV_ROUND_CLOSEST_ULL(val, drvdata->sense_res) : val;
         break;
     default:
         return -EINVAL;
@@ -167,14 +193,11 @@ static long long ltc2945_reg_to_val(struct device *dev, u8 reg)
 static int ltc2945_val_to_reg(struct device *dev, u8 reg,
                   unsigned long val)
 {
-    struct regmap *regmap = dev_get_drvdata(dev);
+    struct ltc2945_data *drvdata = dev_get_drvdata(dev);
     unsigned int control;
     int ret;
 
     switch (reg) {
-    case LTC2945_POWER_H:
-    case LTC2945_MAX_POWER_H:
-    case LTC2945_MIN_POWER_H:
     case LTC2945_MAX_POWER_THRES_H:
     case LTC2945_MIN_POWER_THRES_H:
         /*
@@ -185,7 +208,7 @@ static int ltc2945_val_to_reg(struct device *dev, u8 reg,
          * or voltage at ADIN is used to measure power, which in turn
          * determines register calculations.
          */
-        ret = regmap_read(regmap, LTC2945_CONTROL, &control);
+        ret = regmap_read(drvdata->regmap, LTC2945_CONTROL, &control);
         if (ret < 0)
             return ret;
         if (control & CONTROL_MULT_SELECT) {
@@ -199,36 +222,27 @@ static int ltc2945_val_to_reg(struct device *dev, u8 reg,
              */
             val = DIV_ROUND_CLOSEST(val, 25) * 2;
         }
+        
+        if (drvdata->sense_res > 1)
+            val *= drvdata->sense_res;
+            
         break;
-    case LTC2945_VIN_H:
-    case LTC2945_MAX_VIN_H:
-    case LTC2945_MIN_VIN_H:
     case LTC2945_MAX_VIN_THRES_H:
     case LTC2945_MIN_VIN_THRES_H:
-        /* 25 mV resolution. */
+        /* 25 mV resolution */
         val /= 25;
         break;
-    case LTC2945_ADIN_H:
-    case LTC2945_MAX_ADIN_H:
     case LTC2945_MIN_ADIN_THRES_H:
     case LTC2945_MAX_ADIN_THRES_H:
-    case LTC2945_MIN_ADIN_H:
-        /* 0.5mV resolution. */
+        /* 0.5mV resolution */
         val *= 2;
         break;
-    case LTC2945_SENSE_H:
-    case LTC2945_MAX_SENSE_H:
-    case LTC2945_MIN_SENSE_H:
     case LTC2945_MAX_SENSE_THRES_H:
     case LTC2945_MIN_SENSE_THRES_H:
-        /*
-         * 25 uV resolution. Convert to current as measured with
-         * an 1 mOhm sense resistor, in mA. If a different sense
-         * resistor is installed, calculate the actual current by
-         * dividing the reported current by the sense resistor value
-         * in mOhm.
-         */
+        /* 25 uV resolution */
         val = DIV_ROUND_CLOSEST(val, 25);
+        if (drvdata->sense_res > 1)
+            val *= drvdata->sense_res;
         break;
     default:
         return -EINVAL;
@@ -253,7 +267,7 @@ static ssize_t ltc2945_set_value(struct device *dev,
                      const char *buf, size_t count)
 {
     struct sensor_device_attribute *attr = to_sensor_dev_attr(da);
-    struct regmap *regmap = dev_get_drvdata(dev);
+    struct ltc2945_data *drvdata = dev_get_drvdata(dev);
     u8 reg = attr->index;
     unsigned long val;
     u8 regbuf[3];
@@ -279,7 +293,7 @@ static ssize_t ltc2945_set_value(struct device *dev,
         regbuf[1] = regval & 0xff;
         num_regs = 2;
     }
-    ret = regmap_bulk_write(regmap, reg, regbuf, num_regs);
+    ret = regmap_bulk_write(drvdata->regmap, reg, regbuf, num_regs);
     return ret < 0 ? ret : count;
 }
 
@@ -288,7 +302,7 @@ static ssize_t ltc2945_reset_history(struct device *dev,
                      const char *buf, size_t count)
 {
     struct sensor_device_attribute *attr = to_sensor_dev_attr(da);
-    struct regmap *regmap = dev_get_drvdata(dev);
+    struct ltc2945_data *drvdata = dev_get_drvdata(dev);
     u8 reg = attr->index;
     int num_regs = is_power_reg(reg) ? 3 : 2;
     u8 buf_min[3] = { 0xff, 0xff, 0xff };
@@ -302,11 +316,11 @@ static ssize_t ltc2945_reset_history(struct device *dev,
     if (val != 1)
         return -EINVAL;
 
-    ret = regmap_update_bits(regmap, LTC2945_CONTROL, CONTROL_TEST_MODE,
+    ret = regmap_update_bits(drvdata->regmap, LTC2945_CONTROL, CONTROL_TEST_MODE,
                  CONTROL_TEST_MODE);
 
     /* Reset minimum */
-    ret = regmap_bulk_write(regmap, reg, buf_min, num_regs);
+    ret = regmap_bulk_write(drvdata->regmap, reg, buf_min, num_regs);
     if (ret)
         return ret;
 
@@ -328,10 +342,10 @@ static ssize_t ltc2945_reset_history(struct device *dev,
         return -EINVAL;
     }
     /* Reset maximum */
-    ret = regmap_bulk_write(regmap, reg, buf_max, num_regs);
+    ret = regmap_bulk_write(drvdata->regmap, reg, buf_max, num_regs);
 
     /* Try resetting test mode even if there was an error */
-    regmap_update_bits(regmap, LTC2945_CONTROL, CONTROL_TEST_MODE, 0);
+    regmap_update_bits(drvdata->regmap, LTC2945_CONTROL, CONTROL_TEST_MODE, 0);
 
     return ret ? : count;
 }
@@ -340,17 +354,17 @@ static ssize_t ltc2945_show_bool(struct device *dev,
                  struct device_attribute *da, char *buf)
 {
     struct sensor_device_attribute *attr = to_sensor_dev_attr(da);
-    struct regmap *regmap = dev_get_drvdata(dev);
+    struct ltc2945_data *drvdata = dev_get_drvdata(dev);
     unsigned int fault;
     int ret;
 
-    ret = regmap_read(regmap, LTC2945_FAULT, &fault);
+    ret = regmap_read(drvdata->regmap, LTC2945_FAULT, &fault);
     if (ret < 0)
         return ret;
 
     fault &= attr->index;
     if (fault)      /* Clear reported faults in chip register */
-        regmap_update_bits(regmap, LTC2945_FAULT, attr->index, 0);
+        regmap_update_bits(drvdata->regmap, LTC2945_FAULT, attr->index, 0);
 
     return snprintf(buf, PAGE_SIZE, "%d\n", !!fault);
 }
@@ -458,26 +472,36 @@ static int ltc2945_probe(struct i2c_client *client,
 {
     struct device *dev = &client->dev;
     struct device *hwmon_dev;
-    struct regmap *regmap;
+    struct ltc2945_data *drvdata; 
+    const void *prop;
     
     if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C))
         return -ENODEV;
         
-    dev_info(&client->dev,
-         "chip found, driver version " DRV_VERSION "\n");
+    dev_info(&client->dev, "chip found, driver version %s\n", DRV_VERSION);
+    
+    drvdata = devm_kzalloc(dev, sizeof(*drvdata), GFP_KERNEL);
 
-    regmap = devm_regmap_init_i2c(client, &ltc2945_regmap_config);
-    if (IS_ERR(regmap)) {
+    drvdata->regmap = devm_regmap_init_i2c(client, &ltc2945_regmap_config);
+    if (IS_ERR(drvdata->regmap)) {
         dev_err(dev, "failed to allocate register map\n");
-        return PTR_ERR(regmap);
+        return PTR_ERR(drvdata->regmap);
     }
-
+       
+    /* determine the sense resistor value from dt */
+    drvdata->sense_res = 0;
+    prop = of_get_property(dev->of_node, "sense", NULL);
+    if (prop)
+        drvdata->sense_res = of_read_ulong(prop, 1);
+               
+    drvdata->sense_res = (drvdata->sense_res > 0) ? drvdata->sense_res : 1;
+        
     /* Clear faults */
-    regmap_write(regmap, LTC2945_FAULT, 0x00);
+    regmap_write(drvdata->regmap, LTC2945_FAULT, 0x00);
 
     hwmon_dev = devm_hwmon_device_register_with_groups(dev, client->name,
-                               regmap,
-                               ltc2945_groups);
+                               drvdata,
+                               ltc2945_groups);    
     return PTR_ERR_OR_ZERO(hwmon_dev);
 }
 
